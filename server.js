@@ -14,34 +14,34 @@ const conversationHistory = new Map();
 const MAX_TURNS = 6;
 
 app.post("/webhook/whatsapp", async (req, res) => {
-    const from = req.body.From; // ex: "whatsapp:+15551234567"
-           const body = (req.body.Body || "").trim();
+  const from = req.body.From; // ex: "whatsapp:+15551234567"
+  const body = (req.body.Body || "").trim();
 
-           console.log(`[Gabriel] mensagem de ${from}: ${body}`);
+  console.log(`[Gabriel] mensagem de ${from}: ${body}`);
 
-           const twiml = new twilio.twiml.MessagingResponse();
+  const twiml = new twilio.twiml.MessagingResponse();
 
-           try {
-                 const history = conversationHistory.get(from) || [];
-                 const { reply, escalate, reason } = await getGabrielReply({ history, message: body });
+  try {
+    const history = conversationHistory.get(from) || [];
+    const { reply, escalate, reason } = await getGabrielReply({ history, message: body });
 
-      history.push({ role: "user", content: body });
-                 history.push({ role: "assistant", content: reply });
-                 conversationHistory.set(from, history.slice(-MAX_TURNS * 2));
+    history.push({ role: "user", content: body });
+    history.push({ role: "assistant", content: reply });
+    conversationHistory.set(from, history.slice(-MAX_TURNS * 2));
 
-      if (escalate) {
-              alertStaff({ from, message: body, reason }).catch((err) =>
-                        console.error("[Gabriel] falha ao avisar a equipe:", err)
-                                                                      );
-      }
+    if (escalate) {
+      alertStaff({ from, message: body, reason }).catch((err) =>
+        console.error("[Gabriel] falha ao avisar a equipe:", err)
+      );
+    }
 
-      twiml.message(reply);
-           } catch (err) {
-                 console.error("[Gabriel] erro ao gerar resposta:", err);
-                 twiml.message("Oi! Tive um probleminha aqui agora — já já alguém da equipe te responde, tá bom? 🙏");
-           }
+    twiml.message(reply);
+  } catch (err) {
+    console.error("[Gabriel] erro ao gerar resposta:", err);
+    twiml.message("Oi! Tive um probleminha aqui agora — já já alguém da equipe te responde, tá bom? 🙏");
+  }
 
-           res.type("text/xml").send(twiml.toString());
+  res.type("text/xml").send(twiml.toString());
 });
 
 app.get("/health", (_req, res) => res.send("Gabriel está de pé."));
