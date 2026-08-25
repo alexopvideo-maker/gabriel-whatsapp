@@ -45,7 +45,8 @@ Mande uma mensagem de teste pro número (o próprio Twilio tem um número de san
 ```
 server.js              → recebe o webhook do Twilio, monta a resposta em TwiML
 lib/anthropic.js        → chama o Claude com a persona do Gabriel
-lib/chmeetings.js       → hoje é um placeholder; Fase 2 pluga a API real do ChMeetings
+lib/chmeetings.js       → Fase 2: agenda da semana, lida direto de um Google Calendar (link iCal)
+lib/calendarWrite.js     → Comando do pastor: cria evento na mesma agenda, só pra quem escreve do número da liderança
 lib/escalas.js           → Fase 4: consulta somente leitura ao banco do app de escalas (cafe-church.vercel.app)
 lib/alert.js            → avisa quem está de plantão quando o Gabriel escala
 persona/gabriel-system-prompt.md → o "cérebro" do Gabriel — editável sem mexer em código
@@ -55,9 +56,23 @@ Quer ajustar o jeito que o Gabriel fala ou o que ele sabe fazer? É só editar o
 
 ## Próximos passos (conforme o plano)
 
-- **Fase 2**: preencher `lib/chmeetings.js` com a chamada real à API do ChMeetings (`CHMEETINGS_API_KEY` no `.env`), pra agenda da semana vir sempre atualizada.
-- **Fase 3**: trocar a memória em `Map()` do `server.js` por um banco de verdade, e começar a gravar visitante novo / interesse em grupo de volta no ChMeetings.
-- **Fase 4** (já implementada neste código, falta só a credencial): `lib/escalas.js` consulta direto o banco do app de escalas (`cafe-church.vercel.app`) pra responder "quando é minha escala?" com o dado real. Ver seção abaixo.
+- **Fase 2** (já implementada neste código, falta só o link do calendário): `lib/chmeetings.js` lê a agenda da semana direto de um Google Calendar. Ver seção abaixo.
+- **Fase 3**: trocar a memória em `Map()` do `server.js` por um banco de verdade, e começar a gravar visitante novo / interesse em grupo de volta no ChMeetings (a API/Zapier do ChMeetings cobre escrita em Pessoa, Família e Nota — dá pra usar isso aqui).
+- **Fase 4** (já implementada neste código, feita e testada): `lib/escalas.js` consulta direto o banco do app de escalas (`cafe-church.vercel.app`) pra responder "quando é minha escala?" com o dado real. Ver seção abaixo.
+- **Comando do pastor** (já implementado neste código, falta só a credencial): a liderança pode pedir pro Gabriel marcar um evento novo na agenda, direto pelo WhatsApp. Ver seção abaixo.
+
+## Fase 2 — ligar a agenda da semana (Google Calendar)
+
+O Gabriel já sabe os horários fixos de domingo e quarta (isso nunca muda, está direto na persona). Pra qualquer **outro** evento da semana, ele lê um Google Calendar — sem precisar de chave de API, conta de serviço, nem console do Google Cloud. Só um link que o próprio Google já gera.
+
+1. Crie (ou use um que já exista) um Google Calendar só com os eventos da igreja que você quer que o Gabriel saiba — cultos especiais, reuniões, eventos pontuais.
+2. No [Google Calendar](https://calendar.google.com), passe o mouse sobre esse calendário na barra da esquerda → clique nos três pontinhos (⋮) → **Configurações e compartilhamento**.
+3. Role até **Integrar agenda** e copie o **Endereço secreto no formato iCal** (termina em `/basic.ics`).
+4. Cole esse link na variável `GOOGLE_CALENDAR_ICS_URL`, direto no painel do Render (Environment) — nunca em texto puro em nenhum arquivo, chat ou repositório. Embora seja um link só de leitura, quem tiver esse link enxerga os eventos do calendário, então trate como algo privado.
+
+Enquanto essa variável não estiver preenchida, o Gabriel funciona normalmente com os horários fixos — só não sabe de eventos extras da semana.
+
+**Limitação por enquanto**: eventos que se repetem toda semana (recorrentes) não são expandidos automaticamente — só a primeira ocorrência aparece. Pra um evento pontual isso já resolve; pra algo semanal, cadastre uma ocorrência nova a cada semana até isso evoluir.
 
 ## Fase 4 — ligar a consulta de escala (banco do cafe-church.vercel.app)
 
@@ -89,13 +104,33 @@ Enquanto essa variável não estiver preenchida, o Gabriel funciona normalmente 
 
 **Teste**: depois de preencher, mande pro número do Gabriel, de um telefone que esteja cadastrado como `Member.phone` no app de escalas, algo como "quando é minha escala?" — a resposta deve vir com a data real.
 
+## Comando do pastor — criar evento na agenda pelo WhatsApp
+
+Só quem escreve do número em `PASTOR_WHATSAPP_NUMBER` pode pedir pro Gabriel marcar um evento novo na mesma agenda do Google Calendar da Fase 2 (ex.: "marca uma reunião de líderes quarta às 19h"). O Gabriel confirma o que entendeu na hora — data e hora por extenso — pra dar chance de corrigir se algo saiu errado. Por enquanto só cria evento novo; editar ou cancelar um já existente ainda não é possível por aqui.
+
+Ler a agenda (Fase 2) usa só um link — mas **criar** evento precisa de permissão de escrita de verdade, então o caminho é diferente: uma conta de serviço do Google Cloud.
+
+1. No [Google Cloud Console](https://console.cloud.google.com), crie um projeto (ou use um que já exista).
+2. **APIs e serviços → Biblioteca** → ative a **Google Calendar API**.
+3. **APIs e serviços → Credenciais → Criar credenciais → Conta de serviço**. Dê um nome (ex.: `gabriel-calendario`), sem permissões extras de projeto.
+4. Na conta de serviço criada, aba **Chaves → Adicionar chave → Criar nova chave**, formato **JSON**. Isso baixa um arquivo `.json` pro seu computador — **nunca** suba esse arquivo pro GitHub nem cole o conteúdo em nenhum chat.
+5. Copie o **e-mail** da conta de serviço (algo tipo `gabriel-calendario@SEU-PROJETO.iam.gserviceaccount.com`).
+6. No Google Calendar, na mesma tela de configurações de onde você pegou o link do iCal (Fase 2 — "Configurações e compartilhamento"), em **Compartilhar com pessoas específicas**, adicione esse e-mail com permissão **Fazer alterações nos eventos**.
+7. Copie o conteúdo inteiro do arquivo `.json` e cole na variável `GOOGLE_SERVICE_ACCOUNT_JSON`, direto no painel do Render — nunca em texto puro em nenhum arquivo, chat ou repositório.
+8. Copie o **ID da agenda** (mesma tela, mais acima — geralmente termina em `@group.calendar.google.com`, ou é o seu e-mail do Google se for a agenda principal) e cole em `GOOGLE_CALENDAR_ID`.
+9. Cole o número de WhatsApp da liderança (o mesmo formato do `TWILIO_WHATSAPP_NUMBER`, ex.: `whatsapp:+15551234567`) em `PASTOR_WHATSAPP_NUMBER`.
+
+Enquanto essas três variáveis não estiverem preenchidas, o comando simplesmente não funciona — o resto do Gabriel continua normal.
+
+**Como funciona por dentro** (se quiser entender ou depurar): o modelo, ao entender um pedido de criar evento vindo do número certo, termina a resposta com uma linha interna `[[EVENTO: título | data/hora | duração opcional | descrição opcional]]`, que o `server.js` remove antes de mandar a resposta e usa pra chamar `lib/calendarWrite.js`. Como o Gabriel responde numa única passada (não confirma com o Google Calendar antes de responder), existe uma janela pequena onde ele pode dizer "marquei" e a criação falhar depois (ex.: credencial errada) — isso fica só no log do Render, não numa segunda mensagem pro pastor. Se isso incomodar no dia a dia, dá pra evoluir depois pra um fluxo que espera a confirmação do Google Calendar antes de responder.
+
 ## Deploy no Render
 
 Esse projeto já vem com um `render.yaml` (um "blueprint") que descreve o serviço pro Render — isso deixa a criação praticamente automática.
 
 1. Suba esses arquivos pra um repositório no GitHub (pode ser privado). Se você nunca usou Git, o próprio site do GitHub deixa arrastar os arquivos direto pela interface web, em **Add file → Upload files**.
 2. No [Dashboard do Render](https://dashboard.render.com), clique em **New → Blueprint**, e conecte o repositório que você acabou de criar.
-3. O Render vai ler o `render.yaml` sozinho e mostrar os campos das variáveis de ambiente (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_NUMBER`, `ANTHROPIC_API_KEY`, `CHMEETINGS_API_KEY`, `STAFF_WHATSAPP_NUMBER`, `ESCALAS_DATABASE_URL`) — preencha cada um com o valor real (nunca compartilhe essas chaves em texto puro fora daqui). O `ESCALAS_DATABASE_URL` pode ficar em branco por enquanto — ver a seção "Fase 4" acima.
+3. O Render vai ler o `render.yaml` sozinho e mostrar os campos das variáveis de ambiente (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_NUMBER`, `ANTHROPIC_API_KEY`, `GOOGLE_CALENDAR_ICS_URL`, `PASTOR_WHATSAPP_NUMBER`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_CALENDAR_ID`, `STAFF_WHATSAPP_NUMBER`, `ESCALAS_DATABASE_URL`) — preencha cada um com o valor real (nunca compartilhe essas chaves em texto puro fora daqui). `GOOGLE_CALENDAR_ICS_URL`, `PASTOR_WHATSAPP_NUMBER`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_CALENDAR_ID` e `ESCALAS_DATABASE_URL` podem ficar em branco por enquanto — ver as seções "Fase 2", "Comando do pastor" e "Fase 4" acima.
 4. Clique em **Apply** / **Create**. Em poucos minutos o Render te dá uma URL pública, algo como `https://gabriel-whatsapp.onrender.com`.
 5. Essa URL + `/webhook/whatsapp` é o que vai no campo "When a message comes in" do Twilio (ver seção acima).
 
