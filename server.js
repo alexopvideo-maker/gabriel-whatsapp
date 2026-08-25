@@ -3,6 +3,7 @@ const express = require("express");
 const twilio = require("twilio");
 const { getGabrielReply } = require("./lib/anthropic");
 const { alertStaff } = require("./lib/alert");
+const { criarEvento } = require("./lib/calendarWrite");
 
 const app = express();
 app.use(express.urlencoded({ extended: false }));
@@ -23,7 +24,7 @@ app.post("/webhook/whatsapp", async (req, res) => {
 
   try {
     const history = conversationHistory.get(from) || [];
-    const { reply, escalate, reason } = await getGabrielReply({ history, message: body, from });
+    const { reply, escalate, reason, eventCommand } = await getGabrielReply({ history, message: body, from });
 
     history.push({ role: "user", content: body });
     history.push({ role: "assistant", content: reply });
@@ -41,6 +42,19 @@ app.post("/webhook/whatsapp", async (req, res) => {
         console.error("[Gabriel] falha ao avisar a equipe:", err)
       );
     }
+
+    // Comando do pastor: só tem efeito se a mensagem realmente veio do
+    // número configurado em PASTOR_WHATSAPP_NUMBER — mesmo que o modelo, por
+    // algum motivo, gere a tag pra outra pessoa, essa checagem no código
+    // (não só no prompt) garante que nada é criado sem ser essa pessoa.
+    if (eventCommand && process.env.PASTOR_WHATSAPP_NUMBER && from === process.env.PASTOR_WHATSAPP_NUMBER) {
+      criarEvento(eventCommand)
+        .then((resultado) => console.log(`[Gabriel] comando de evento — ${resultado.ok ? "OK" : "FALHOU"}: ${resultado.mensagem}`))
+        .catch((err) => console.error("[Gabriel] falha ao criar evento no calendário:", err));
+    } else if (eventCommand) {
+      console.warn(`[Gabriel] tag [[EVENTO]] recebida de número que não é o pastor (${from}) — ignorada.`);
+    }
+
     return;
   } catch (err) {
     console.error("[Gabriel] erro ao gerar resposta:", err);
