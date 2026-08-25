@@ -20,3 +20,5 @@ services:
         sync: false
       - key: STAFF_WHATSAPP_NUMBER
         sync: false
+      - key: ESCALAS_DATABASE_URL
+        sync: false
