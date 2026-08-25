@@ -23,7 +23,7 @@ app.post("/webhook/whatsapp", async (req, res) => {
 
   try {
     const history = conversationHistory.get(from) || [];
-    const { reply, escalate, reason } = await getGabrielReply({ history, message: body });
+    const { reply, escalate, reason } = await getGabrielReply({ history, message: body, from });
 
     history.push({ role: "user", content: body });
     history.push({ role: "assistant", content: reply });
