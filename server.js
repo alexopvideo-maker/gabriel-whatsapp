@@ -29,13 +29,19 @@ app.post("/webhook/whatsapp", async (req, res) => {
     history.push({ role: "assistant", content: reply });
     conversationHistory.set(from, history.slice(-MAX_TURNS * 2));
 
+    twiml.message(reply);
+    res.type("text/xml").send(twiml.toString());
+
+    // Manda o alerta pra equipe só DEPOIS de despachar a resposta pra quem
+    // escreveu — assim a pessoa sempre recebe a resposta do Gabriel primeiro,
+    // e quem está de plantão recebe o aviso em seguida (evita a resposta e o
+    // alerta chegando fora de ordem quando os dois caem no mesmo WhatsApp).
     if (escalate) {
       alertStaff({ from, message: body, reason }).catch((err) =>
         console.error("[Gabriel] falha ao avisar a equipe:", err)
       );
     }
-
-    twiml.message(reply);
+    return;
   } catch (err) {
     console.error("[Gabriel] erro ao gerar resposta:", err);
     twiml.message("Oi! Tive um probleminha aqui agora — já já alguém da equipe te responde, tá bom? 🙏");
