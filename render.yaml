@@ -16,7 +16,13 @@ services:
         sync: false
       - key: ANTHROPIC_MODEL
         value: claude-haiku-4-5-20251001
-      - key: CHMEETINGS_API_KEY
+      - key: GOOGLE_CALENDAR_ICS_URL
+        sync: false
+      - key: PASTOR_WHATSAPP_NUMBER
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: GOOGLE_CALENDAR_ID
         sync: false
       - key: STAFF_WHATSAPP_NUMBER
         sync: false
