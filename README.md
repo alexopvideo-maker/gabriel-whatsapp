@@ -46,6 +46,7 @@ Mande uma mensagem de teste pro número (o próprio Twilio tem um número de san
 server.js              → recebe o webhook do Twilio, monta a resposta em TwiML
 lib/anthropic.js        → chama o Claude com a persona do Gabriel
 lib/chmeetings.js       → hoje é um placeholder; Fase 2 pluga a API real do ChMeetings
+lib/escalas.js           → Fase 4: consulta somente leitura ao banco do app de escalas (cafe-church.vercel.app)
 lib/alert.js            → avisa quem está de plantão quando o Gabriel escala
 persona/gabriel-system-prompt.md → o "cérebro" do Gabriel — editável sem mexer em código
 ```
@@ -56,6 +57,37 @@ Quer ajustar o jeito que o Gabriel fala ou o que ele sabe fazer? É só editar o
 
 - **Fase 2**: preencher `lib/chmeetings.js` com a chamada real à API do ChMeetings (`CHMEETINGS_API_KEY` no `.env`), pra agenda da semana vir sempre atualizada.
 - **Fase 3**: trocar a memória em `Map()` do `server.js` por um banco de verdade, e começar a gravar visitante novo / interesse em grupo de volta no ChMeetings.
+- **Fase 4** (já implementada neste código, falta só a credencial): `lib/escalas.js` consulta direto o banco do app de escalas (`cafe-church.vercel.app`) pra responder "quando é minha escala?" com o dado real. Ver seção abaixo.
+
+## Fase 4 — ligar a consulta de escala (banco do cafe-church.vercel.app)
+
+O app de escalas (`cafe-church.vercel.app`) guarda tudo num banco Postgres. Em vez de duplicar essa informação, o Gabriel consulta esse banco direto — mas com uma credencial **própria, criada só pra isso, e só com permissão de leitura (SELECT)**. Ele nunca usa a credencial de escrita que o app de escalas usa pra gravar.
+
+**Isso é trabalho de quem tem acesso ao banco do app de escalas** — normalmente quem criou o `cafe-church.vercel.app`. Os passos:
+
+1. Conecte no banco Postgres do app de escalas (pelo painel do provedor que hospeda ele, ou por qualquer cliente SQL) com um usuário que tenha permissão de administrador.
+2. Rode o SQL abaixo pra criar um usuário novo, só de leitura, nas tabelas que o Gabriel precisa (troque `uma-senha-forte-aqui` por uma senha gerada, não uma frase fácil de adivinhar):
+
+   ```sql
+   CREATE USER gabriel_readonly WITH PASSWORD 'uma-senha-forte-aqui';
+   GRANT CONNECT ON DATABASE postgres TO gabriel_readonly;
+   GRANT USAGE ON SCHEMA public TO gabriel_readonly;
+   GRANT SELECT ON "Member", "Couple", "SundayAssignment", "DiscipleshipAssignment" TO gabriel_readonly;
+   ```
+
+   (O nome do banco depois de `DATABASE` pode não ser `postgres` — confirme com o provedor que hospeda o banco do app de escalas. As demais linhas não mudam.)
+
+3. Monte a connection string com esse novo usuário, no formato:
+
+   ```
+   postgresql://gabriel_readonly:uma-senha-forte-aqui@HOST:5432/NOME_DO_BANCO?sslmode=require
+   ```
+
+4. Cole esse valor na variável `ESCALAS_DATABASE_URL`, direto no painel do Render (Environment) — nunca em texto puro em nenhum arquivo, chat ou repositório. Você mesmo faz essa parte; ninguém mais precisa ver essa senha.
+
+Enquanto essa variável não estiver preenchida, o Gabriel funciona normalmente — só que, se alguém perguntar sobre a escala dela, ele diz que vai confirmar com a equipe em vez de consultar o banco.
+
+**Teste**: depois de preencher, mande pro número do Gabriel, de um telefone que esteja cadastrado como `Member.phone` no app de escalas, algo como "quando é minha escala?" — a resposta deve vir com a data real.
 
 ## Deploy no Render
 
@@ -63,7 +95,7 @@ Esse projeto já vem com um `render.yaml` (um "blueprint") que descreve o servi�
 
 1. Suba esses arquivos pra um repositório no GitHub (pode ser privado). Se você nunca usou Git, o próprio site do GitHub deixa arrastar os arquivos direto pela interface web, em **Add file → Upload files**.
 2. No [Dashboard do Render](https://dashboard.render.com), clique em **New → Blueprint**, e conecte o repositório que você acabou de criar.
-3. O Render vai ler o `render.yaml` sozinho e mostrar os campos das variáveis de ambiente (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_NUMBER`, `ANTHROPIC_API_KEY`, `CHMEETINGS_API_KEY`, `STAFF_WHATSAPP_NUMBER`) — preencha cada um com o valor real (nunca compartilhe essas chaves em texto puro fora daqui).
+3. O Render vai ler o `render.yaml` sozinho e mostrar os campos das variáveis de ambiente (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_NUMBER`, `ANTHROPIC_API_KEY`, `CHMEETINGS_API_KEY`, `STAFF_WHATSAPP_NUMBER`, `ESCALAS_DATABASE_URL`) — preencha cada um com o valor real (nunca compartilhe essas chaves em texto puro fora daqui). O `ESCALAS_DATABASE_URL` pode ficar em branco por enquanto — ver a seção "Fase 4" acima.
 4. Clique em **Apply** / **Create**. Em poucos minutos o Render te dá uma URL pública, algo como `https://gabriel-whatsapp.onrender.com`.
 5. Essa URL + `/webhook/whatsapp` é o que vai no campo "When a message comes in" do Twilio (ver seção acima).
 
