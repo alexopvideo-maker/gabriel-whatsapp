@@ -47,7 +47,8 @@ app.post("/webhook/whatsapp", async (req, res) => {
     // número configurado em PASTOR_WHATSAPP_NUMBER — mesmo que o modelo, por
     // algum motivo, gere a tag pra outra pessoa, essa checagem no código
     // (não só no prompt) garante que nada é criado sem ser essa pessoa.
-    if (eventCommand && process.env.PASTOR_WHATSAPP_NUMBER && from === process.env.PASTOR_WHATSAPP_NUMBER) {
+    const pastorNumber = (process.env.PASTOR_WHATSAPP_NUMBER || "").trim();
+    if (eventCommand && pastorNumber && from.trim() === pastorNumber) {
       criarEvento(eventCommand)
         .then((resultado) => console.log(`[Gabriel] comando de evento — ${resultado.ok ? "OK" : "FALHOU"}: ${resultado.mensagem}`))
         .catch((err) => console.error("[Gabriel] falha ao criar evento no calendário:", err));
