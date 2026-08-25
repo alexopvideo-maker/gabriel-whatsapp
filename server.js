@@ -4,6 +4,7 @@ const twilio = require("twilio");
 const { getGabrielReply } = require("./lib/anthropic");
 const { alertStaff } = require("./lib/alert");
 const { criarEvento } = require("./lib/calendarWrite");
+const { criarTarefa, criarProjeto } = require("./lib/notionWrite");
 
 const app = express();
 app.use(express.urlencoded({ extended: false }));
@@ -24,7 +25,7 @@ app.post("/webhook/whatsapp", async (req, res) => {
 
   try {
     const history = conversationHistory.get(from) || [];
-    const { reply, escalate, reason, eventCommand } = await getGabrielReply({ history, message: body, from });
+    const { reply, escalate, reason, eventCommand, taskCommand, projectCommand } = await getGabrielReply({ history, message: body, from });
 
     history.push({ role: "user", content: body });
     history.push({ role: "assistant", content: reply });
@@ -54,6 +55,25 @@ app.post("/webhook/whatsapp", async (req, res) => {
         .catch((err) => console.error("[Gabriel] falha ao criar evento no calendário:", err));
     } else if (eventCommand) {
       console.warn(`[Gabriel] tag [[EVENTO]] recebida de número que não é o pastor (${from}) — ignorada.`);
+    }
+
+    // Comando do pastor: tarefa simples → base "Tarefas Diárias" no Notion.
+    // Mesma checagem de número de cima — só o pastor aciona.
+    if (taskCommand && pastorNumber && from.trim() === pastorNumber) {
+      criarTarefa(taskCommand)
+        .then((resultado) => console.log(`[Gabriel] comando de tarefa — ${resultado.ok ? "OK" : "FALHOU"}: ${resultado.mensagem}`))
+        .catch((err) => console.error("[Gabriel] falha ao criar tarefa no Notion:", err));
+    } else if (taskCommand) {
+      console.warn(`[Gabriel] tag [[TAREFA]] recebida de número que não é o pastor (${from}) — ignorada.`);
+    }
+
+    // Comando do pastor: projeto com checklist de etapas → base "PROJETOS" no Notion.
+    if (projectCommand && pastorNumber && from.trim() === pastorNumber) {
+      criarProjeto(projectCommand)
+        .then((resultado) => console.log(`[Gabriel] comando de projeto — ${resultado.ok ? "OK" : "FALHOU"}: ${resultado.mensagem}`))
+        .catch((err) => console.error("[Gabriel] falha ao criar projeto no Notion:", err));
+    } else if (projectCommand) {
+      console.warn(`[Gabriel] tag [[PROJETO]] recebida de número que não é o pastor (${from}) — ignorada.`);
     }
 
     return;
