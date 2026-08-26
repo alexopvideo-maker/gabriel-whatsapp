@@ -30,3 +30,5 @@ services:
         sync: false
       - key: ESCALAS_DATABASE_URL
         sync: false
+      - key: MANYCHAT_SHARED_SECRET
+        sync: false
