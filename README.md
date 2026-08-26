@@ -47,6 +47,7 @@ server.js              → recebe o webhook do Twilio, monta a resposta em TwiML
 lib/anthropic.js        → chama o Claude com a persona do Gabriel
 lib/chmeetings.js       → Fase 2: agenda da semana, lida direto de um Google Calendar (link iCal)
 lib/calendarWrite.js     → Comando do pastor: cria evento na mesma agenda, só pra quem escreve do número da liderança
+lib/notionWrite.js       → Comando do pastor: cria tarefa/projeto no Notion, só pra quem escreve do número da liderança
 lib/escalas.js           → Fase 4: consulta somente leitura ao banco do app de escalas (cafe-church.vercel.app)
 lib/alert.js            → avisa quem está de plantão quando o Gabriel escala
 persona/gabriel-system-prompt.md → o "cérebro" do Gabriel — editável sem mexer em código
@@ -59,7 +60,7 @@ Quer ajustar o jeito que o Gabriel fala ou o que ele sabe fazer? É só editar o
 - **Fase 2** (já implementada neste código, falta só o link do calendário): `lib/chmeetings.js` lê a agenda da semana direto de um Google Calendar. Ver seção abaixo.
 - **Fase 3**: trocar a memória em `Map()` do `server.js` por um banco de verdade, e começar a gravar visitante novo / interesse em grupo de volta no ChMeetings (a API/Zapier do ChMeetings cobre escrita em Pessoa, Família e Nota — dá pra usar isso aqui).
 - **Fase 4** (já implementada neste código, feita e testada): `lib/escalas.js` consulta direto o banco do app de escalas (`cafe-church.vercel.app`) pra responder "quando é minha escala?" com o dado real. Ver seção abaixo.
-- **Comando do pastor** (já implementado neste código, falta só a credencial): a liderança pode pedir pro Gabriel marcar um evento novo na agenda, direto pelo WhatsApp. Ver seção abaixo.
+- **Comando do pastor** (já implementado neste código, falta só a credencial): a liderança pode pedir pro Gabriel marcar um evento novo na agenda, criar uma tarefa ou abrir um projeto com checklist, direto pelo WhatsApp. Ver seção abaixo.
 
 ## Fase 2 — ligar a agenda da semana (Google Calendar)
 
@@ -104,7 +105,7 @@ Enquanto essa variável não estiver preenchida, o Gabriel funciona normalmente 
 
 **Teste**: depois de preencher, mande pro número do Gabriel, de um telefone que esteja cadastrado como `Member.phone` no app de escalas, algo como "quando é minha escala?" — a resposta deve vir com a data real.
 
-## Comando do pastor — criar evento na agenda pelo WhatsApp
+## Comando do pastor — criar evento, tarefa ou projeto pelo WhatsApp
 
 Só quem escreve do número em `PASTOR_WHATSAPP_NUMBER` pode pedir pro Gabriel marcar um evento novo na mesma agenda do Google Calendar da Fase 2 (ex.: "marca uma reunião de líderes quarta às 19h"). O Gabriel confirma o que entendeu na hora — data e hora por extenso — pra dar chance de corrigir se algo saiu errado. Por enquanto só cria evento novo; editar ou cancelar um já existente ainda não é possível por aqui.
 
@@ -124,13 +125,26 @@ Enquanto essas três variáveis não estiverem preenchidas, o comando simplesmen
 
 **Como funciona por dentro** (se quiser entender ou depurar): o modelo, ao entender um pedido de criar evento vindo do número certo, termina a resposta com uma linha interna `[[EVENTO: título | data/hora | duração opcional | descrição opcional]]`, que o `server.js` remove antes de mandar a resposta e usa pra chamar `lib/calendarWrite.js`. Como o Gabriel responde numa única passada (não confirma com o Google Calendar antes de responder), existe uma janela pequena onde ele pode dizer "marquei" e a criação falhar depois (ex.: credencial errada) — isso fica só no log do Render, não numa segunda mensagem pro pastor. Se isso incomodar no dia a dia, dá pra evoluir depois pra um fluxo que espera a confirmação do Google Calendar antes de responder.
 
+### Tarefas e projetos (Notion)
+
+Além da agenda, a liderança pode pedir pro Gabriel anotar uma tarefa simples (vai pra base **Tarefas Diárias**) ou abrir um projeto com checklist de etapas (vai pra base **PROJETOS**, dentro de "Projetos CAFE CURCH") — ambas no Notion. Igual ao evento, só quem escreve do número em `PASTOR_WHATSAPP_NUMBER` aciona isso.
+
+`PROJETOS` já existia no workspace; `Tarefas Diárias` foi criada nova, porque a home "Minhas Tarefas" do Notion é um recurso interno do produto e não pode ser compartilhado com integrações.
+
+1. No Notion, vá em **app.notion.com/profile/integrations** (ou pelo menu **Configurações → Conexões**) → **Nova conexão**.
+2. Método de autenticação: **Token de acesso** (não OAuth). Dê um nome (ex.: `Gabriel WhatsApp`). As permissões padrão (ler, inserir e atualizar conteúdo) já servem.
+3. Abra a base **Tarefas Diárias**, menu **"..." → Conexões**, e adicione a conexão que você acabou de criar. Repita na base **PROJETOS**.
+4. De volta na página da conexão (aba **Configuração**), clique no ícone de olho pra revelar o **Token de acesso** (começa com `ntn_`), copie e cole na variável `NOTION_API_KEY`, direto no painel do Render — nunca em texto puro em nenhum arquivo, chat ou repositório.
+
+Enquanto `NOTION_API_KEY` não estiver preenchida, os comandos de tarefa e projeto simplesmente não funcionam — o resto do Gabriel continua normal. Se as bases forem recriadas ou renomeadas um dia, os IDs ficam no topo de `lib/notionWrite.js`.
+
 ## Deploy no Render
 
 Esse projeto já vem com um `render.yaml` (um "blueprint") que descreve o serviço pro Render — isso deixa a criação praticamente automática.
 
 1. Suba esses arquivos pra um repositório no GitHub (pode ser privado). Se você nunca usou Git, o próprio site do GitHub deixa arrastar os arquivos direto pela interface web, em **Add file → Upload files**.
 2. No [Dashboard do Render](https://dashboard.render.com), clique em **New → Blueprint**, e conecte o repositório que você acabou de criar.
-3. O Render vai ler o `render.yaml` sozinho e mostrar os campos das variáveis de ambiente (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_NUMBER`, `ANTHROPIC_API_KEY`, `GOOGLE_CALENDAR_ICS_URL`, `PASTOR_WHATSAPP_NUMBER`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_CALENDAR_ID`, `STAFF_WHATSAPP_NUMBER`, `ESCALAS_DATABASE_URL`) — preencha cada um com o valor real (nunca compartilhe essas chaves em texto puro fora daqui). `GOOGLE_CALENDAR_ICS_URL`, `PASTOR_WHATSAPP_NUMBER`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_CALENDAR_ID` e `ESCALAS_DATABASE_URL` podem ficar em branco por enquanto — ver as seções "Fase 2", "Comando do pastor" e "Fase 4" acima.
+3. O Render vai ler o `render.yaml` sozinho e mostrar os campos das variáveis de ambiente (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_NUMBER`, `ANTHROPIC_API_KEY`, `GOOGLE_CALENDAR_ICS_URL`, `PASTOR_WHATSAPP_NUMBER`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_CALENDAR_ID`, `NOTION_API_KEY`, `STAFF_WHATSAPP_NUMBER`, `ESCALAS_DATABASE_URL`) — preencha cada um com o valor real (nunca compartilhe essas chaves em texto puro fora daqui). `GOOGLE_CALENDAR_ICS_URL`, `PASTOR_WHATSAPP_NUMBER`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_CALENDAR_ID`, `NOTION_API_KEY` e `ESCALAS_DATABASE_URL` podem ficar em branco por enquanto — ver as seções "Fase 2", "Comando do pastor" e "Fase 4" acima.
 4. Clique em **Apply** / **Create**. Em poucos minutos o Render te dá uma URL pública, algo como `https://gabriel-whatsapp.onrender.com`.
 5. Essa URL + `/webhook/whatsapp` é o que vai no campo "When a message comes in" do Twilio (ver seção acima).
 
