@@ -1,6 +1,6 @@
-# Gabriel no WhatsApp — serviço (Fase 1 → 2)
+# Gabriel — serviço (WhatsApp + Instagram)
 
-Este é o "escutador" da Opção A do plano: um serviço pequeno que recebe as respostas no número de WhatsApp que **já está em uso** (o mesmo que manda as escalas pelo app), aciona o Gabriel via Claude, e responde de volta pelo mesmo número. Ninguém do outro lado percebe que trocou de sistema — pra quem está conversando, é a mesma linha de sempre.
+Este é o "escutador" da Opção A do plano: um serviço pequeno que recebe as mensagens no número de WhatsApp que **já está em uso** (o mesmo que manda as escalas pelo app) e no Direct do Instagram (@cafechurchofc, via ManyChat), aciona o Gabriel via Claude, e responde de volta pelo mesmo canal. Ninguém do outro lado percebe que trocou de sistema — pra quem está conversando, é a mesma linha de sempre.
 
 ## Antes de começar
 
@@ -43,17 +43,19 @@ Mande uma mensagem de teste pro número (o próprio Twilio tem um número de san
 ## Estrutura
 
 ```
-server.js              → recebe o webhook do Twilio, monta a resposta em TwiML
-lib/anthropic.js        → chama o Claude com a persona do Gabriel
+server.js              → recebe os webhooks do Twilio (WhatsApp) e do ManyChat (Instagram), monta as respostas
+lib/anthropic.js        → chama o Claude com a persona do Gabriel (WhatsApp)
+lib/instagramReply.js   → chama o Claude com a persona do Gabriel (Instagram) — réplica enxuta do lib/anthropic.js
 lib/chmeetings.js       → Fase 2: agenda da semana, lida direto de um Google Calendar (link iCal)
 lib/calendarWrite.js     → Comando do pastor: cria evento na mesma agenda, só pra quem escreve do número da liderança
 lib/notionWrite.js       → Comando do pastor: cria tarefa/projeto no Notion, só pra quem escreve do número da liderança
 lib/escalas.js           → Fase 4: consulta somente leitura ao banco do app de escalas (cafe-church.vercel.app)
-lib/alert.js            → avisa quem está de plantão quando o Gabriel escala
-persona/gabriel-system-prompt.md → o "cérebro" do Gabriel — editável sem mexer em código
+lib/alert.js            → avisa quem está de plantão quando o Gabriel escala (WhatsApp e Instagram)
+persona/gabriel-system-prompt.md   → o "cérebro" do Gabriel no WhatsApp — editável sem mexer em código
+persona/instagram-system-prompt.md → o "cérebro" do Gabriel no Instagram — editável sem mexer em código
 ```
 
-Quer ajustar o jeito que o Gabriel fala ou o que ele sabe fazer? É só editar o `persona/gabriel-system-prompt.md` — não precisa tocar em nenhum `.js`.
+Quer ajustar o jeito que o Gabriel fala ou o que ele sabe fazer? É só editar o `persona/gabriel-system-prompt.md` (WhatsApp) ou o `persona/instagram-system-prompt.md` (Instagram) — não precisa tocar em nenhum `.js`.
 
 ## Próximos passos (conforme o plano)
 
@@ -61,6 +63,7 @@ Quer ajustar o jeito que o Gabriel fala ou o que ele sabe fazer? É só editar o
 - **Fase 3**: trocar a memória em `Map()` do `server.js` por um banco de verdade, e começar a gravar visitante novo / interesse em grupo de volta no ChMeetings (a API/Zapier do ChMeetings cobre escrita em Pessoa, Família e Nota — dá pra usar isso aqui).
 - **Fase 4** (já implementada neste código, feita e testada): `lib/escalas.js` consulta direto o banco do app de escalas (`cafe-church.vercel.app`) pra responder "quando é minha escala?" com o dado real. Ver seção abaixo.
 - **Comando do pastor** (já implementado neste código, falta só a credencial): a liderança pode pedir pro Gabriel marcar um evento novo na agenda, criar uma tarefa ou abrir um projeto com checklist, direto pelo WhatsApp. Ver seção abaixo.
+- **Instagram (ManyChat)** (já implementado neste código, falta só configurar o lado do ManyChat): o Direct do @cafechurchofc responde com o mesmo Gabriel, via um endpoint que o ManyChat chama. Ver seção abaixo.
 
 ## Fase 2 — ligar a agenda da semana (Google Calendar)
 
@@ -138,13 +141,38 @@ Além da agenda, a liderança pode pedir pro Gabriel anotar uma tarefa simples (
 
 Enquanto `NOTION_API_KEY` não estiver preenchida, os comandos de tarefa e projeto simplesmente não funcionam — o resto do Gabriel continua normal. Se as bases forem recriadas ou renomeadas um dia, os IDs ficam no topo de `lib/notionWrite.js`.
 
+## Instagram (ManyChat) — réplica do Gabriel no Direct
+
+O Direct do @cafechurchofc responde com o mesmo Gabriel — mesmo Claude, tom parecido — só que numa persona mais enxuta (sem escala pessoal nem comando da liderança, que continuam exclusivos do WhatsApp, porque não tem como ligar com segurança um contato do Instagram a um número de telefone cadastrado). O código já está pronto (`lib/instagramReply.js`, `persona/instagram-system-prompt.md`, rota `/webhook/instagram` no `server.js`) — falta só configurar o lado do ManyChat, que é feito direto na conta do ManyChat, não por aqui.
+
+1. Gere um valor aleatório forte (ex.: `openssl rand -hex 32` no terminal, ou peça pra mim gerar um) e cole na variável `MANYCHAT_SHARED_SECRET`, direto no painel do Render — esse valor é o que garante que só o ManyChat consegue chamar esse endpoint. Guarde esse mesmo valor, você vai precisar dele no passo 3.
+2. No ManyChat, dentro do fluxo que responde o Direct (ou criando um novo), adicione uma ação **External Request** (fica em "Dev Tools" / "Actions"):
+   - **Method**: `POST`
+   - **URL**: `https://gabriel-whatsapp.onrender.com/webhook/instagram`
+   - **Headers**: `Content-Type: application/json` e `X-ManyChat-Secret: <o valor que você colou no Render>`
+   - **Body** (JSON), usando as variáveis do próprio ManyChat:
+     ```json
+     {
+       "contact_id": "{{contact_id}}",
+       "message": "{{last input text}}",
+       "name": "{{first name}} {{last name}}"
+     }
+     ```
+3. Na seção de **mapeamento da resposta** dessa mesma ação, mapeie `$.reply` (JSON Path) pra um campo customizado de texto — por exemplo, crie um campo chamado `gabriel_reply` — e, se quiser usar depois pra rotear conversas, mapeie `$.escalate` pra um campo booleano tipo `gabriel_escalou`.
+4. Logo depois da ação External Request no fluxo, adicione um passo **Send Message** com o texto sendo o campo customizado `{{gabriel_reply}}` — é isso que a pessoa recebe no Direct.
+5. Ligue esse fluxo no gatilho que faz sentido pra vocês — o mais simples é como **resposta padrão** (a automação que roda quando nenhuma outra palavra-chave bate), assim ele pega qualquer pergunta solta tipo "onde é a igreja" ou "que horas é o culto".
+
+Sobre a política do Instagram: como o Gabriel só responde a mensagens que a pessoa mandou primeiro (nunca manda mensagem por conta própria), isso está dentro do uso normal permitido pelo Meta — a janela de 24h e o limite de mensagens por hora valem pra broadcast/marketing, não pra resposta automática de uma conversa que a pessoa começou.
+
+Enquanto `MANYCHAT_SHARED_SECRET` não estiver preenchido no Render, o endpoint fica desligado de propósito (responde 503) — não aceita chamadas de ninguém.
+
 ## Deploy no Render
 
 Esse projeto já vem com um `render.yaml` (um "blueprint") que descreve o serviço pro Render — isso deixa a criação praticamente automática.
 
 1. Suba esses arquivos pra um repositório no GitHub (pode ser privado). Se você nunca usou Git, o próprio site do GitHub deixa arrastar os arquivos direto pela interface web, em **Add file → Upload files**.
 2. No [Dashboard do Render](https://dashboard.render.com), clique em **New → Blueprint**, e conecte o repositório que você acabou de criar.
-3. O Render vai ler o `render.yaml` sozinho e mostrar os campos das variáveis de ambiente (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_NUMBER`, `ANTHROPIC_API_KEY`, `GOOGLE_CALENDAR_ICS_URL`, `PASTOR_WHATSAPP_NUMBER`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_CALENDAR_ID`, `NOTION_API_KEY`, `STAFF_WHATSAPP_NUMBER`, `ESCALAS_DATABASE_URL`) — preencha cada um com o valor real (nunca compartilhe essas chaves em texto puro fora daqui). `GOOGLE_CALENDAR_ICS_URL`, `PASTOR_WHATSAPP_NUMBER`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_CALENDAR_ID`, `NOTION_API_KEY` e `ESCALAS_DATABASE_URL` podem ficar em branco por enquanto — ver as seções "Fase 2", "Comando do pastor" e "Fase 4" acima.
+3. O Render vai ler o `render.yaml` sozinho e mostrar os campos das variáveis de ambiente (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_NUMBER`, `ANTHROPIC_API_KEY`, `GOOGLE_CALENDAR_ICS_URL`, `PASTOR_WHATSAPP_NUMBER`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_CALENDAR_ID`, `NOTION_API_KEY`, `STAFF_WHATSAPP_NUMBER`, `ESCALAS_DATABASE_URL`, `MANYCHAT_SHARED_SECRET`) — preencha cada um com o valor real (nunca compartilhe essas chaves em texto puro fora daqui). `GOOGLE_CALENDAR_ICS_URL`, `PASTOR_WHATSAPP_NUMBER`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_CALENDAR_ID`, `NOTION_API_KEY`, `ESCALAS_DATABASE_URL` e `MANYCHAT_SHARED_SECRET` podem ficar em branco por enquanto — ver as seções "Fase 2", "Comando do pastor", "Fase 4" e "Instagram (ManyChat)" acima.
 4. Clique em **Apply** / **Create**. Em poucos minutos o Render te dá uma URL pública, algo como `https://gabriel-whatsapp.onrender.com`.
 5. Essa URL + `/webhook/whatsapp` é o que vai no campo "When a message comes in" do Twilio (ver seção acima).
 
