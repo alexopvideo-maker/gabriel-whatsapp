@@ -4,7 +4,7 @@ const twilio = require("twilio");
 const { getGabrielReply } = require("./lib/anthropic");
 const { getInstagramReply } = require("./lib/instagramReply");
 const { alertStaff } = require("./lib/alert");
-const { criarEvento } = require("./lib/calendarWrite");
+const { criarEvento, criarEventoRecorrente } = require("./lib/calendarWrite");
 const { criarTarefa, criarProjeto } = require("./lib/notionWrite");
 
 const app = express();
@@ -31,7 +31,7 @@ app.post("/webhook/whatsapp", async (req, res) => {
 
   try {
     const history = conversationHistory.get(from) || [];
-    const { reply, escalate, reason, eventCommand, taskCommand, projectCommand } = await getGabrielReply({ history, message: body, from });
+    const { reply, escalate, reason, eventCommand, recurringEventCommand, taskCommand, projectCommand } = await getGabrielReply({ history, message: body, from });
 
     history.push({ role: "user", content: body });
     history.push({ role: "assistant", content: reply });
@@ -61,6 +61,16 @@ app.post("/webhook/whatsapp", async (req, res) => {
         .catch((err) => console.error("[Gabriel] falha ao criar evento no calendário:", err));
     } else if (eventCommand) {
       console.warn(`[Gabriel] tag [[EVENTO]] recebida de número que não é o pastor (${from}) — ignorada.`);
+    }
+
+    // Comando do pastor: evento RECORRENTE (repete em um ou mais dias da
+    // semana, dentro de um período) — mesma checagem de número de cima.
+    if (recurringEventCommand && pastorNumber && from.trim() === pastorNumber) {
+      criarEventoRecorrente(recurringEventCommand)
+        .then((resultado) => console.log(`[Gabriel] comando de evento recorrente — ${resultado.ok ? "OK" : "FALHOU"}: ${resultado.mensagem}`))
+        .catch((err) => console.error("[Gabriel] falha ao criar evento recorrente no calendário:", err));
+    } else if (recurringEventCommand) {
+      console.warn(`[Gabriel] tag [[EVENTO_RECORRENTE]] recebida de número que não é o pastor (${from}) — ignorada.`);
     }
 
     // Comando do pastor: tarefa simples → base "Tarefas Diárias" no Notion.
