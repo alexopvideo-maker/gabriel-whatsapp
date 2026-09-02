@@ -21,6 +21,26 @@ const MAX_TURNS = 6;
 // contact_id que o ManyChat manda (identifica o contato do Direct).
 const instagramHistory = new Map();
 
+// Depois desse tempo sem mensagem nova da mesma pessoa, a próxima mensagem
+// começa uma conversa do zero em vez de herdar o histórico antigo. Sem isso,
+// uma mensagem avulsa dias depois — por exemplo, uma reação/comentário
+// relayado pelo ManyChat quando alguém comenta num post do Instagram —
+// herdava o histórico de uma conversa antiga (ex.: alguém que já tinha
+// perguntado "onde fica a igreja" dias atrás), e o Gabriel "puxava" aquele
+// assunto antigo pra responder a uma mensagem que não tinha nada a ver.
+const HISTORY_TTL_MS = 6 * 60 * 60 * 1000; // 6 horas
+
+function getHistory(store, key) {
+  const entry = store.get(key);
+  if (!entry) return [];
+  if (Date.now() - entry.lastMessageAt > HISTORY_TTL_MS) return [];
+  return entry.history;
+}
+
+function saveHistory(store, key, history) {
+  store.set(key, { history, lastMessageAt: Date.now() });
+}
+
 app.post("/webhook/whatsapp", async (req, res) => {
   const from = req.body.From; // ex: "whatsapp:+15551234567"
   const body = (req.body.Body || "").trim();
@@ -30,12 +50,12 @@ app.post("/webhook/whatsapp", async (req, res) => {
   const twiml = new twilio.twiml.MessagingResponse();
 
   try {
-    const history = conversationHistory.get(from) || [];
+    const history = getHistory(conversationHistory, from);
     const { reply, escalate, reason, eventCommand, recurringEventCommand, taskCommand, projectCommand } = await getGabrielReply({ history, message: body, from });
 
     history.push({ role: "user", content: body });
     history.push({ role: "assistant", content: reply });
-    conversationHistory.set(from, history.slice(-MAX_TURNS * 2));
+    saveHistory(conversationHistory, from, history.slice(-MAX_TURNS * 2));
 
     twiml.message(reply);
     res.type("text/xml").send(twiml.toString());
@@ -132,12 +152,12 @@ app.post("/webhook/instagram", async (req, res) => {
   console.log(`[Gabriel/Instagram] mensagem de ${contactId} (${name || "sem nome"}): ${message}`);
 
   try {
-    const history = instagramHistory.get(contactId) || [];
+    const history = getHistory(instagramHistory, contactId);
     const { reply, escalate, reason } = await getInstagramReply({ history, message });
 
     history.push({ role: "user", content: message });
     history.push({ role: "assistant", content: reply });
-    instagramHistory.set(contactId, history.slice(-MAX_TURNS * 2));
+    saveHistory(instagramHistory, contactId, history.slice(-MAX_TURNS * 2));
 
     res.json({ reply, escalate });
 
